@@ -11,6 +11,7 @@
         "install:all": "npm install",
         "setup-env": "node scripts/setup-envs.js",
         "dev": "concurrently -n \"BACKEND,FRONTEND\" -c \"blue,magenta\" \"npm run dev --workspace=robs-backend\" \"npm run dev --workspace=robs-frontend\"",
+        "installer": "node scripts/setup.js",
         "clean": "rimraf node_modules **/node_modules package-lock.json **/package-lock.json"
     },
     "devDependencies": {

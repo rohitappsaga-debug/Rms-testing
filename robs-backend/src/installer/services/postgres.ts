@@ -1,24 +1,61 @@
 
-import { spawn } from 'child_process';
+import { spawn, execSync } from 'child_process';
 import os from 'os';
+import fs from 'fs';
+import path from 'path';
 
 export interface PostgresStatus {
     installed: boolean;
     version?: string;
+    exePath?: string;
     error?: {
         code: 'PG_NOT_FOUND' | 'PG_INSTALL_FAILED' | 'PERMISSION_DENIED' | 'UNKNOWN';
         message: string;
     };
 }
 
+const COMMON_WIN_PATHS = [
+    'C:\\Program Files\\PostgreSQL\\17\\bin\\psql.exe',
+    'C:\\Program Files\\PostgreSQL\\16\\bin\\psql.exe',
+    'C:\\Program Files\\PostgreSQL\\15\\bin\\psql.exe',
+    'C:\\Program Files\\PostgreSQL\\14\\bin\\psql.exe',
+    'C:\\Program Files\\PostgreSQL\\13\\bin\\psql.exe',
+];
+
 export const checkPostgresInstalled = async (): Promise<PostgresStatus> => {
+    // 1. Try simple 'psql' (PATH check)
     try {
         const version = await runCommand('psql', ['--version']);
-        return { installed: true, version: version.trim() };
+        return { installed: true, version: version.trim(), exePath: 'psql' };
     } catch (error) {
+        // 2. If not in PATH and on Windows, try common paths
+        if (os.platform() === 'win32') {
+            for (const pgPath of COMMON_WIN_PATHS) {
+                if (fs.existsSync(pgPath)) {
+                    try {
+                        const version = await runCommand(`"${pgPath}"`, ['--version']);
+                        return { installed: true, version: version.trim(), exePath: pgPath };
+                    } catch (e) {
+                        // Continue to next path
+                    }
+                }
+            }
+
+            // 3. Last ditch effort: try to find it using where or dir (expensive, but better than failing)
+            try {
+                const foundPath = execSync('where /R "C:\\Program Files\\PostgreSQL" psql.exe', { encoding: 'utf8' }).split('\n')[0]?.trim();
+                if (foundPath && fs.existsSync(foundPath)) {
+                    const version = await runCommand(`"${foundPath}"`, ['--version']);
+                    return { installed: true, version: version.trim(), exePath: foundPath };
+                }
+            } catch (e) {
+                // Ignore
+            }
+        }
+
         return {
             installed: false,
-            error: { code: 'PG_NOT_FOUND', message: 'PostgreSQL not found in PATH' }
+            error: { code: 'PG_NOT_FOUND', message: 'PostgreSQL not found in PATH or common locations' }
         };
     }
 };

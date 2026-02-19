@@ -141,6 +141,24 @@ export const startInstallation = async (req: Request, res: Response) => {
         res.write(`data: ${JSON.stringify({ type: 'status', step, status })}\n\n`);
     };
 
+    // Reload .env from disk into process.env so prisma.config.ts gets the
+    // credentials the user just configured (not the stale startup values)
+    const envFilePath = path.join(process.cwd(), '.env');
+    if (fs.existsSync(envFilePath)) {
+        const lines = fs.readFileSync(envFilePath, 'utf-8').split('\n');
+        for (const line of lines) {
+            const trimmed = line.trim();
+            if (!trimmed || trimmed.startsWith('#')) continue;
+            const eqIdx = trimmed.indexOf('=');
+            if (eqIdx > 0) {
+                const key = trimmed.substring(0, eqIdx).trim();
+                const val = trimmed.substring(eqIdx + 1).trim();
+                process.env[key] = val;
+            }
+        }
+        sendLog('Loaded latest configuration from .env');
+    }
+
     try {
         // 1. Install Dependencies
         sendStatus('dependencies', 'running');
@@ -180,10 +198,18 @@ export const startInstallation = async (req: Request, res: Response) => {
         }
         sendStatus('seeding', 'success');
 
-        // 4. Build Frontend (if applicable) and Backend
+        // 4. Build Frontend and Backend
         sendStatus('build', 'running');
-        sendLog('Building application...');
+        sendLog('Building backend application...');
         await runShellCommand('npm', ['run', 'build'], sendLog);
+
+        sendLog('Building frontend application...');
+        const frontendDir = path.resolve(process.cwd(), '../robs-frontend');
+        if (fs.existsSync(frontendDir)) {
+            await runShellCommand('npm', ['run', 'build'], sendLog, frontendDir);
+        } else {
+            sendLog('WARNING: robs-frontend directory not found, skipping frontend build.');
+        }
         sendStatus('build', 'success');
 
         // 5. Finalize
@@ -198,3 +224,16 @@ export const startInstallation = async (req: Request, res: Response) => {
         res.end();
     }
 };
+
+export const restartServer = async (req: Request, res: Response) => {
+    res.json({ success: true, message: 'Server is restarting...' });
+
+    console.log('Restart requested. Shutting down in 2 seconds...');
+
+    // Give time for the response to be sent
+    setTimeout(() => {
+        console.log('Exiting process for restart.');
+        process.exit(0);
+    }, 2000);
+};
+

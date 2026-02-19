@@ -188,7 +188,7 @@ const server = createServer(app);
 const io = new Server(server, {
     cors: {
         origin: [
-            process.env.SOCKET_CORS_ORIGIN || 'http://localhost:3000',
+            process.env.SOCKET_CORS_ORIGIN || 'http://localhost:3002',
             'http://localhost:5173', // Vite default port
             'http://localhost:4173', // Vite preview port
         ],
@@ -209,7 +209,8 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
     origin: [
-        process.env.CORS_ORIGIN || 'http://localhost:3000',
+        process.env.CORS_ORIGIN || 'http://localhost:3002',
+        'http://localhost:3005', // Installer port
         'http://localhost:5173', // Vite default port
         'http://localhost:4173', // Vite preview port
     ],
@@ -238,28 +239,6 @@ app.use(morgan('combined', { stream: morganStream }));
 // Body parsing middleware
 app.use(express.json({ limit: '10mb' }));
 app.use(express.urlencoded({ extended: true, limit: '10mb' }));
-
-// Health check endpoint
-app.get('/health', async (req, res) => {
-    try {
-        const { checkDatabaseHealth } = await import('@/utils/database');
-        const dbHealth = await checkDatabaseHealth();
-
-        res.status(dbHealth ? 200 : 503).json({
-            status: dbHealth ? 'healthy' : 'unhealthy',
-            timestamp: new Date().toISOString(),
-            uptime: process.uptime(),
-            database: dbHealth ? 'connected' : 'disconnected',
-        });
-    } catch (error) {
-        logger.error('Health check failed:', error);
-        res.status(503).json({
-            status: 'unhealthy',
-            timestamp: new Date().toISOString(),
-            error: 'Health check failed',
-        });
-    }
-});
 
 // Swagger documentation - setup after server starts or on first request
 app.use('/api-docs', swaggerUi.serve, (req: any, res: any, next: any) => {
@@ -293,6 +272,11 @@ app.use('/api/reports', reportRoutes);
 app.use('/api/categories', categoriesRoutes);
 app.use('/api/reservations', reservationRoutes);
 app.use('/api/payments', paymentRoutes);
+
+// Health check for installer monitoring
+app.get('/health', (req, res) => {
+    res.json({ status: 'ok', timestamp: new Date().toISOString() });
+});
 
 // Serve static files from the React frontend app
 const frontendPath = path.join(__dirname, '../../robs-frontend/build');

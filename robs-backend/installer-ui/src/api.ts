@@ -17,5 +17,6 @@ export const checkDbStatus = () => api.get('/database/status');
 export const installDb = () => api.post('/database/install');
 export const configureDb = (config: any) => api.post('/database/configure', config);
 export const saveSettings = (settings: any) => api.post('/settings', settings);
+export const restartInstaller = () => api.post('/restart');
 
 export default api;

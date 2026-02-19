@@ -1,4 +1,4 @@
-﻿-- CreateSchema
+-- CreateSchema
 CREATE SCHEMA IF NOT EXISTS "public";
 
 -- CreateEnum
@@ -139,7 +139,7 @@ CREATE TABLE "notifications" (
 CREATE TABLE "settings" (
     "id" TEXT NOT NULL,
     "tax_rate" DECIMAL(5,2) NOT NULL DEFAULT 5.00,
-    "currency" VARCHAR(10) NOT NULL DEFAULT 'Γé╣',
+    "currency" VARCHAR(10) NOT NULL DEFAULT '₹',
     "restaurant_name" VARCHAR(100) NOT NULL DEFAULT 'Restaurant',
     "discount_presets" JSONB NOT NULL DEFAULT '[]',
     "printer_config" JSONB NOT NULL DEFAULT '{}',
@@ -365,4 +365,3 @@ ALTER TABLE "recipes" ADD CONSTRAINT "recipes_ingredient_id_fkey" FOREIGN KEY ("
 
 -- AddForeignKey
 ALTER TABLE "recipes" ADD CONSTRAINT "recipes_menu_item_id_fkey" FOREIGN KEY ("menu_item_id") REFERENCES "menu_items"("id") ON DELETE RESTRICT ON UPDATE CASCADE;
-
