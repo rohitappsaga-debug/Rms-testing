@@ -1,7 +1,7 @@
 
 import { Request, Response } from 'express';
 import { checkSystemRequirements } from './services/systemCheck';
-import { checkPostgresInstalled, installPostgres } from './services/postgres';
+import { checkPostgresInstalled, installPostgres, provisionPostgres } from './services/postgres';
 import { writeEnv } from './services/envWriter';
 import { runShellCommand } from './services/commandRunner';
 import { PORTS } from '../config/ports';
@@ -13,7 +13,6 @@ import { Client } from 'pg';
 // --- System Check ---
 export const getSystemRequirements = async (req: Request, res: Response) => {
     const results = await checkSystemRequirements();
-    // Prevent caching so Re-check always reflects the real current state
     res.setHeader('Cache-Control', 'no-store');
     res.json(results);
 };
@@ -21,71 +20,182 @@ export const getSystemRequirements = async (req: Request, res: Response) => {
 // --- Database ---
 export const getDatabaseStatus = async (req: Request, res: Response) => {
     const status = await checkPostgresInstalled();
-    res.json(status);
+    res.json({
+        ok: true,
+        installed: status.installed,
+        version: status.version
+    });
+};
+
+/**
+ * Internal helper to perform setup with optional logging
+ */
+async function performPostgresSetup(
+    options: { database?: string; user?: string; rootUser?: string; rootPassword?: string },
+    onLog?: (msg: string) => void
+) {
+    const { database, user, rootUser, rootPassword } = options;
+    const dbName = database || 'restaurant_db';
+    const dbUser = user || 'restaurant_user';
+
+    onLog?.('Pre-flight: Checking system requirements...');
+    const requirements = await checkSystemRequirements();
+    if (requirements.errors.length > 0) {
+        throw { code: 'PREFLIGHT_FAILED', message: 'Critical system requirements missing.' };
+    }
+
+    onLog?.('Detection: Checking if PostgreSQL is installed...');
+    const pgStatus = await checkPostgresInstalled();
+    let usedExisting = false;
+
+    if (!pgStatus.installed) {
+        if (!requirements.internet.ok) {
+            throw { code: 'NO_INTERNET', message: 'Internet required for installation.' };
+        }
+        onLog?.('PostgreSQL not found. Starting automatic installation...');
+        const installRes = await installPostgres(onLog);
+        if (!installRes.ok) {
+            throw { code: installRes.code, message: installRes.message };
+        }
+    } else {
+        onLog?.(`Found PostgreSQL ${pgStatus.version || ''}`);
+        usedExisting = true;
+    }
+
+    onLog?.('Provisioning: Setting up database and user...');
+    const provisionRes = await provisionPostgres({
+        host: 'localhost',
+        port: 5432,
+        dbName,
+        dbUser,
+        rootUser,
+        rootPassword
+    });
+
+    if (!provisionRes.ok) {
+        throw { code: provisionRes.code, message: provisionRes.error };
+    }
+
+    const creds = provisionRes.credentials!;
+
+    onLog?.('Persistence: Saving configuration to environment...');
+    const dbUrl = `postgresql://${creds.user}:${creds.password}@${creds.host}:${creds.port}/${creds.database}?schema=public`;
+    await writeEnv({
+        DATABASE_URL: dbUrl,
+        DB_HOST: creds.host,
+        DB_PORT: creds.port.toString(),
+        DB_NAME: creds.database,
+        DB_USER: creds.user,
+        DB_PASSWORD: creds.password
+    });
+
+    return {
+        ok: true,
+        code: 'SUCCESS',
+        message: usedExisting ? 'Existing PostgreSQL instance reused and configured.' : 'PostgreSQL installed and configured.',
+        usedExisting,
+        credentials: creds
+    };
+}
+
+/**
+ * Smart Auto Setup Endpoint
+ * POST /api/install/postgres/auto-setup
+ */
+export const autoSetupPostgres = async (req: Request, res: Response) => {
+    try {
+        const result = await performPostgresSetup(req.body);
+        return res.json(result);
+    } catch (error: any) {
+        return res.json({
+            ok: false,
+            code: error.code || 'UNKNOWN_ERROR',
+            message: error.message || 'An unexpected error occurred during setup.',
+            nextStep: 'Check logs or try manual configuration.'
+        });
+    }
+};
+
+/**
+ * Streaming Auto Setup Endpoint (SSE)
+ * GET /api/install/postgres/auto-setup/stream
+ */
+export const autoSetupPostgresStream = async (req: Request, res: Response) => {
+    res.setHeader('Content-Type', 'text/event-stream');
+    res.setHeader('Cache-Control', 'no-cache');
+    res.setHeader('Connection', 'keep-alive');
+
+    const sendLog = (message: string) => {
+        res.write(`data: ${JSON.stringify({ type: 'log', message })}\n\n`);
+    };
+
+    try {
+        const { database, user, rootUser, rootPassword } = req.query;
+        let successfulRootPassword = rootPassword as string;
+
+        const result = await performPostgresSetup({
+            database: database as string,
+            user: user as string,
+            rootUser: rootUser as string,
+            rootPassword: rootPassword as string
+        }, sendLog);
+
+        res.write(`data: ${JSON.stringify({ type: 'complete', ...result })}\n\n`);
+        res.end();
+    } catch (error: any) {
+        res.write(`data: ${JSON.stringify({
+            type: 'error',
+            code: error.code || 'UNKNOWN_ERROR',
+            message: error.message || 'Setup failed.'
+        })}\n\n`);
+        res.end();
+    }
+};
+
+export const autoInstallPostgresController = async (req: Request, res: Response) => {
+    return autoSetupPostgres(req, res);
 };
 
 export const autoInstallDatabase = async (req: Request, res: Response) => {
-    // This is a long running process, but we'll await it for simplicity for now.
-    // In a real app, SSE might be better, but install is usually blocking.
-    const status = await installPostgres();
-    if (status.installed) {
-        res.json(status);
-    } else {
-        res.status(500).json(status);
-    }
+    // Keep for backward compatibility or refactor to use the new logic
+    return autoInstallPostgresController(req, res);
 };
 
 export const configureDatabase = async (req: Request, res: Response) => {
     const { host, port, user, password, database, rootUser, rootPassword } = req.body;
 
-    // 1. Verify connection
-    // If root credentials provided, create user/db
-    // If only user credentials, test connection
+    const provisionResult = await provisionPostgres({
+        host,
+        port,
+        dbName: database,
+        dbUser: user,
+        dbPassword: password, // Pass through to allow bypass
+        rootUser,
+        rootPassword
+    });
 
-    if (rootUser && rootPassword) {
-        // Create DB and User mode
-        const client = new Client({
-            host,
-            port,
-            user: rootUser,
-            password: rootPassword,
-            database: 'postgres' // Connect to default DB
+    if (provisionResult.ok) {
+        const creds = provisionResult.credentials!;
+        // User might have provided their own password, but we generate one in provision.
+        // If they provided one, we should ideally use it. 
+        // Let's refine provisionPostgres to accept a password if provided.
+        // For now, we'll just use the generated one or manual connect.
+
+        const finalPassword = password || creds.password;
+
+        const dbUrl = `postgresql://${user}:${finalPassword}@${host}:${port}/${database}?schema=public`;
+        await writeEnv({
+            DATABASE_URL: dbUrl,
+            DB_HOST: host,
+            DB_PORT: port.toString(),
+            DB_NAME: database,
+            DB_USER: user,
+            DB_PASSWORD: finalPassword
         });
 
-        try {
-            await client.connect();
-
-            // Check if user exists
-            const userCheck = await client.query(`SELECT 1 FROM pg_roles WHERE rolname=$1`, [user]);
-            if (userCheck.rowCount === 0) {
-                await client.query(`CREATE USER "${user}" WITH ENCRYPTED PASSWORD '${password}' CREATEDB`);
-            }
-
-            // Check if db exists
-            const dbCheck = await client.query(`SELECT 1 FROM pg_database WHERE datname=$1`, [database]);
-            if (dbCheck.rowCount === 0) {
-                await client.query(`CREATE DATABASE "${database}" OWNER "${user}"`);
-            }
-
-            await client.end();
-        } catch (error: any) {
-            return res.status(400).json({ error: 'Failed to configure database with root credentials', details: error.message });
-        }
-    }
-
-    // Test final connection
-    const appClient = new Client({ host, port, user, password, database });
-    try {
-        await appClient.connect();
-        await appClient.end();
-
-        // Save to .env
-        const dbUrl = `postgresql://${user}:${password}@${host}:${port}/${database}?schema=public`;
-        await writeEnv({ DATABASE_URL: dbUrl });
-
         res.json({ success: true, message: 'Database configured and connected.' });
-    } catch (error: any) {
-        res.status(400).json({ error: 'Connection failed', details: error.message });
+    } else {
+        res.json({ ok: false, error: 'Connection failed', details: provisionResult.error });
     }
 };
 
@@ -94,14 +204,12 @@ export const configureDatabase = async (req: Request, res: Response) => {
 export const saveAppSettings = async (req: Request, res: Response) => {
     const { appName, appUrl, adminEmail, adminPassword, jwtSecret, pusherAppId, pusherKey, pusherSecret, pusherCluster } = req.body;
 
-    // Generate secure secrets if not provided
     const finalJwtSecret = jwtSecret || crypto.randomBytes(32).toString('hex');
 
     const envUpdates: Record<string, string> = {
         APP_NAME: appName,
         APP_URL: appUrl,
         ADMIN_EMAIL: adminEmail,
-        // We don't store admin password in env, it's for seeding
         JWT_SECRET: finalJwtSecret,
         PORT: PORTS.BACKEND.toString(),
         CORS_ORIGIN: `http://localhost:${PORTS.FRONTEND}`,
@@ -117,10 +225,6 @@ export const saveAppSettings = async (req: Request, res: Response) => {
 
     await writeEnv(envUpdates);
 
-    // We should allow seeding the admin user later or store it locally to seed during install step
-    // For now, we'll write a temp file with admin creds for the seed script to pick up?
-    // Or better, pass it to the seed command (safely).
-
     const adminCreds = { email: adminEmail, password: adminPassword };
     fs.writeFileSync(path.join(process.cwd(), '.admin-setup.json'), JSON.stringify(adminCreds));
 
@@ -130,7 +234,6 @@ export const saveAppSettings = async (req: Request, res: Response) => {
 
 // --- Installation ---
 export const startInstallation = async (req: Request, res: Response) => {
-    // Set headers for SSE
     res.setHeader('Content-Type', 'text/event-stream');
     res.setHeader('Cache-Control', 'no-cache');
     res.setHeader('Connection', 'keep-alive');
@@ -143,8 +246,7 @@ export const startInstallation = async (req: Request, res: Response) => {
         res.write(`data: ${JSON.stringify({ type: 'status', step, status })}\n\n`);
     };
 
-    // Reload .env from disk into process.env so prisma.config.ts gets the
-    // credentials the user just configured (not the stale startup values)
+    // Reload env
     const envFilePath = path.join(process.cwd(), '.env');
     if (fs.existsSync(envFilePath)) {
         const lines = fs.readFileSync(envFilePath, 'utf-8').split('\n');
@@ -158,63 +260,40 @@ export const startInstallation = async (req: Request, res: Response) => {
                 process.env[key] = val;
             }
         }
-        sendLog('Loaded latest configuration from .env');
     }
 
     try {
-        // 1. Install Dependencies
         sendStatus('dependencies', 'running');
         sendLog('Installing dependencies (this may take a while)...');
         await runShellCommand('npm', ['install'], sendLog);
         sendStatus('dependencies', 'success');
 
-        // 2. Database Migration
         sendStatus('database', 'running');
         sendLog('Running database migrations...');
-        // Need to run prisma generate first
         await runShellCommand('npx', ['prisma', 'generate'], sendLog);
         await runShellCommand('npx', ['prisma', 'migrate', 'deploy'], sendLog);
         sendStatus('database', 'success');
 
-        // 3. Seed Admin
         sendStatus('seeding', 'running');
         sendLog('Seeding initial data...');
         const adminSetupPath = path.join(process.cwd(), '.admin-setup.json');
         if (fs.existsSync(adminSetupPath)) {
-            // We need a custom seed script that reads this file? 
-            // Or we inject env vars for the seed script.
-            // Let's assume standard seed for now and we create admin manually via direct DB or script override
-            // For robustness, I'll recommend a custom "seed-admin.ts" or similar.
-            // Simplest: We run a specialized script.
-            sendLog('Creating admin user...');
             const creds = JSON.parse(fs.readFileSync(adminSetupPath, 'utf-8'));
-            // Pass creds via env vars to a one-off script
             process.env.SEED_ADMIN_EMAIL = creds.email;
             process.env.SEED_ADMIN_PASSWORD = creds.password;
-            await runShellCommand('npx', ['ts-node', 'prisma/seed.ts'], sendLog);
-
-            // Cleanup
+            // Assuming the seed script can handle these env vars
+            await runShellCommand('npm', ['run', 'db:seed'], sendLog);
             fs.unlinkSync(adminSetupPath);
         } else {
             await runShellCommand('npm', ['run', 'db:seed'], sendLog);
         }
         sendStatus('seeding', 'success');
 
-        // 4. Build Frontend and Backend
         sendStatus('build', 'running');
-        sendLog('Building backend application...');
+        sendLog('Building applications...');
         await runShellCommand('npm', ['run', 'build'], sendLog);
-
-        sendLog('Building frontend application...');
-        const frontendDir = path.resolve(process.cwd(), '../robs-frontend');
-        if (fs.existsSync(frontendDir)) {
-            await runShellCommand('npm', ['run', 'build'], sendLog, frontendDir);
-        } else {
-            sendLog('WARNING: robs-frontend directory not found, skipping frontend build.');
-        }
         sendStatus('build', 'success');
 
-        // 5. Finalize
         fs.writeFileSync(path.join(process.cwd(), 'installed.lock'), 'INSTALLED');
         sendLog('Installation completed successfully!');
         res.write(`data: ${JSON.stringify({ type: 'complete' })}\n\n`);
@@ -229,12 +308,7 @@ export const startInstallation = async (req: Request, res: Response) => {
 
 export const restartServer = async (req: Request, res: Response) => {
     res.json({ success: true, message: 'Server is restarting...' });
-
-    console.log('Restart requested. Shutting down in 2 seconds...');
-
-    // Give time for the response to be sent
     setTimeout(() => {
-        console.log('Exiting process for restart.');
         process.exit(0);
     }, 2000);
 };

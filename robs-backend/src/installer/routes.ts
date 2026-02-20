@@ -3,7 +3,8 @@ import { Router } from 'express';
 import {
     getSystemRequirements,
     getDatabaseStatus,
-    autoInstallDatabase,
+    autoSetupPostgres,
+    autoSetupPostgresStream,
     configureDatabase,
     saveAppSettings,
     startInstallation,
@@ -13,17 +14,23 @@ import { checkInstallerLock } from './middleware';
 
 const router = Router();
 
-// Restart route is allowed even if locked (it's the exit mechanism)
+// Restart route is allowed even if locked
 router.post('/restart', restartServer);
 
 // Apply lock check to configuration routes
 router.use(checkInstallerLock);
 
 router.get('/check', getSystemRequirements);
+router.get('/postgres/status', getDatabaseStatus);
+router.post('/postgres/auto-setup', autoSetupPostgres);
+router.get('/postgres/auto-setup/stream', autoSetupPostgresStream);
+
+// Aliases for compatibility if needed
 router.get('/database/status', getDatabaseStatus);
-router.post('/database/install', autoInstallDatabase);
+router.post('/postgres/auto-install', autoSetupPostgres);
+
 router.post('/database/configure', configureDatabase);
 router.post('/settings', saveAppSettings);
-router.get('/install/run', startInstallation); // GET for SSE
+router.get('/install/run', startInstallation);
 
 export default router;

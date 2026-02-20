@@ -40,10 +40,15 @@ export function AdminDashboard({ tables, orders, currency }: AdminDashboardProps
     fetchTrends();
   }, []);
 
-  const todaySales = orders.reduce((sum, order) => sum + order.total, 0);
+  // Calculate Today's Metrics
+  const todayStr = new Date().toISOString().split('T')[0];
+  const todayOrdersList = orders.filter(order => order.createdAt.startsWith(todayStr));
+
+  const todaySales = todayOrdersList.reduce((sum, order) => sum + order.total, 0);
+  const todayOrdersCount = todayOrdersList.length;
+
   const calculateActiveTables = () => tables.filter(t => t.status === 'occupied').length;
   const activeTables = calculateActiveTables();
-  const totalOrders = orders.length;
 
   const pendingOrders = orders.filter(o => !['delivered', 'served', 'completed', 'cancelled'].includes(o.status));
 
@@ -53,14 +58,14 @@ export function AdminDashboard({ tables, orders, currency }: AdminDashboardProps
     : 0;
 
   const ordersTrend = yesterdayMetrics?.orders
-    ? ((totalOrders - yesterdayMetrics.orders) / yesterdayMetrics.orders) * 100
+    ? ((todayOrdersCount - yesterdayMetrics.orders) / yesterdayMetrics.orders) * 100
     : 0;
 
   const occupancyRate = tables.length > 0 ? (activeTables / tables.length) * 100 : 0;
 
   // Hourly Volume Calculation
   const hourlyData = new Array(24).fill(0);
-  orders.forEach(order => {
+  todayOrdersList.forEach(order => {
     const d = new Date(order.createdAt);
     const hour = d.getHours();
     if (hour >= 0 && hour < 24) {
@@ -84,8 +89,8 @@ export function AdminDashboard({ tables, orders, currency }: AdminDashboardProps
             trendDirection={revenueTrend >= 0 ? 'up' : 'down'}
           />
           <StatCard
-            title="Total Orders"
-            value={totalOrders.toString()}
+            title="Today Orders"
+            value={todayOrdersCount.toString()}
             trend={`${ordersTrend > 0 ? '+' : ''}${ordersTrend.toFixed(1)}%`}
             trendDirection={ordersTrend >= 0 ? 'up' : 'down'}
           />

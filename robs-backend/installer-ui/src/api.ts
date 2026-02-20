@@ -14,7 +14,10 @@ export const checkSystem = () =>
     api.get('/check', { headers: { 'Cache-Control': 'no-store' } });
 
 export const checkDbStatus = () => api.get('/database/status');
+export const getPgStatus = () => api.get('/postgres/status');
+export const autoSetupPostgres = (config: any) => api.post('/postgres/auto-setup', config);
 export const installDb = () => api.post('/database/install');
+export const autoInstallPostgres = (config: any) => api.post('/postgres/auto-setup', config);
 export const configureDb = (config: any) => api.post('/database/configure', config);
 export const saveSettings = (settings: any) => api.post('/settings', settings);
 export const restartInstaller = () => api.post('/restart');

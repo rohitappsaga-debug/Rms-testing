@@ -6,22 +6,26 @@ const ENV_PATH = path.join(process.cwd(), '.env');
 const ENV_BAK_PATH = path.join(process.cwd(), '.env.bak');
 const ENV_TMP_PATH = path.join(process.cwd(), '.env.tmp');
 
+/**
+ * Robustly writes environment variables to .env file.
+ * Creates a backup before writing and uses an atomic write pattern.
+ */
 export const writeEnv = async (envVars: Record<string, string>) => {
-    // 1. Read existing .env if present
-    let currentEnvContent = '';
+    // 1. Create Backup if .env exists
     if (fs.existsSync(ENV_PATH)) {
-        currentEnvContent = fs.readFileSync(ENV_PATH, 'utf-8');
-
-        // Create backup if not exists
-        if (!fs.existsSync(ENV_BAK_PATH)) {
+        try {
             fs.copyFileSync(ENV_PATH, ENV_BAK_PATH);
+        } catch (e) {
+            console.error('Failed to create .env backup:', e);
+            // Continue anyway, but not ideal
         }
     }
 
-    // 2. Parse current env to preserve comments and layout? 
-    // For simplicity and robustness, we will append or replace specific keys 
-    // but keeping a dictionary approach is safer for the installer flow.
-    // We'll parse the existing file into a map to preserve other manual keys.
+    // 2. Read current content to merge
+    let currentEnvContent = '';
+    if (fs.existsSync(ENV_PATH)) {
+        currentEnvContent = fs.readFileSync(ENV_PATH, 'utf-8');
+    }
 
     const envMap = parseEnv(currentEnvContent);
 
@@ -32,18 +36,35 @@ export const writeEnv = async (envVars: Record<string, string>) => {
 
     // 4. Construct new content
     let newContent = '';
-    envMap.forEach((value, key) => {
-        newContent += `${key}=${value}\n`;
+    // Preserve some order if possible, or just alphabetical
+    const sortedKeys = Array.from(envMap.keys()).sort();
+    sortedKeys.forEach(key => {
+        newContent += `${key}=${envMap.get(key)}\n`;
     });
 
-    // 5. Atomic Write
-    fs.writeFileSync(ENV_TMP_PATH, newContent);
-    fs.renameSync(ENV_TMP_PATH, ENV_PATH);
+    // 5. Atomic Write (Write to TMP, then rename)
+    try {
+        fs.writeFileSync(ENV_TMP_PATH, newContent);
+        if (os_platform_is_win()) {
+            // fs.renameSync on Windows fails if target exists
+            if (fs.existsSync(ENV_PATH)) {
+                fs.unlinkSync(ENV_PATH);
+            }
+        }
+        fs.renameSync(ENV_TMP_PATH, ENV_PATH);
+    } catch (err: any) {
+        throw new Error(`Failed to write .env file: ${err.message}`);
+    }
 };
 
+const os_platform_is_win = () => process.platform === 'win32';
+
+/**
+ * Parses .env content into a Map, preserving existing values.
+ */
 const parseEnv = (content: string): Map<string, string> => {
     const map = new Map<string, string>();
-    const lines = content.split('\n');
+    const lines = content.split(/\r?\n/);
     lines.forEach(line => {
         const trimmed = line.trim();
         if (!trimmed || trimmed.startsWith('#')) return;
