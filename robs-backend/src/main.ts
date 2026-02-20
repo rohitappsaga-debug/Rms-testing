@@ -188,7 +188,7 @@ const server = createServer(app);
 const io = new Server(server, {
     cors: {
         origin: [
-            process.env.SOCKET_CORS_ORIGIN || 'http://localhost:3002',
+            process.env.SOCKET_CORS_ORIGIN || `http://localhost:${PORTS.FRONTEND}`,
             'http://localhost:5173', // Vite default port
             'http://localhost:4173', // Vite preview port
         ],
@@ -209,7 +209,7 @@ app.use(helmet({
 // CORS configuration
 app.use(cors({
     origin: [
-        process.env.CORS_ORIGIN || 'http://localhost:3002',
+        process.env.CORS_ORIGIN || `http://localhost:${PORTS.FRONTEND}`,
         'http://localhost:3005', // Installer port
         'http://localhost:5173', // Vite default port
         'http://localhost:4173', // Vite preview port

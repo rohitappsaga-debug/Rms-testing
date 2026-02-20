@@ -103,7 +103,9 @@ export const saveAppSettings = async (req: Request, res: Response) => {
         ADMIN_EMAIL: adminEmail,
         // We don't store admin password in env, it's for seeding
         JWT_SECRET: finalJwtSecret,
-        PORT: PORTS.BACKEND.toString()
+        PORT: PORTS.BACKEND.toString(),
+        CORS_ORIGIN: `http://localhost:${PORTS.FRONTEND}`,
+        SOCKET_CORS_ORIGIN: `http://localhost:${PORTS.FRONTEND}`
     };
 
     if (pusherAppId && pusherKey && pusherSecret && pusherCluster) {

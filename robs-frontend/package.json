@@ -66,6 +66,7 @@
             "vite": "^6.4.1"
       },
       "scripts": {
+            "start": "vite",
             "dev": "vite",
             "build": "vite build",
             "preview": "vite preview",

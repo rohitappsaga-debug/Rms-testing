@@ -92,6 +92,7 @@ export default defineConfig({
   },
   server: {
     port: 3002,           // PORTS.FRONTEND — React dev server
+    strictPort: true,
     open: true,
     proxy: {
       '/api': {
