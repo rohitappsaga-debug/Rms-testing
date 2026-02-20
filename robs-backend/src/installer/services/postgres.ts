@@ -126,15 +126,23 @@ export const installPostgres = async (onLog?: (data: string) => void): Promise<C
         onLog?.('Detecting Linux package manager...');
 
         const managers = [
-            { cmd: 'apt-get', args: ['update', '&&', 'apt-get', 'install', '-y', 'postgresql', 'postgresql-contrib'] },
-            { cmd: 'dnf', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] },
-            { cmd: 'yum', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] }
+            { cmd: 'apt-get', name: 'apt', args: ['update', '&&', 'apt-get', 'install', '-y', 'postgresql', 'postgresql-contrib'] },
+            { cmd: 'dnf', name: 'dnf', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] },
+            { cmd: 'yum', name: 'yum', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] }
         ];
 
         for (const manager of managers) {
             const check = await runShellCommand(manager.cmd, ['--version']);
             if (check.ok) {
                 onLog?.(`Found ${manager.cmd}. Starting installation...`);
+
+                // Try pkexec first for desktop users (GUI password prompt)
+                onLog?.('Requesting root privileges via pkexec...');
+                const pkResult = await runShellCommand('pkexec', [manager.cmd, ...manager.args], onLog);
+                if (pkResult.ok) return pkResult;
+
+                // Fallback to sudo (which may fail if non-interactive)
+                onLog?.('pkexec failed or unavailable. Falling back to sudo...');
                 return await runShellCommand('sudo', manager.args, onLog);
             }
         }

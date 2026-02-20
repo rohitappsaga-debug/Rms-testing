@@ -252,7 +252,9 @@ export default function DatabaseStep({ onNext }: { onNext: () => void }) {
                                         <p className="font-bold mb-1">{installResult.message}</p>
                                         <p className="text-xs opacity-70 mb-3">
                                             {installResult.code === 'INSTALL_FAILED'
-                                                ? 'This usually happens if the installer isn\'t running as Administrator. Please close the terminal, right-click "Terminal" or "PowerShell", select "Run as Administrator", and try again.'
+                                                ? (window.navigator.platform.toLowerCase().includes('win')
+                                                    ? 'This usually happens if the installer isn\'t running as Administrator. Please close the terminal, right-click "Terminal" or "PowerShell", select "Run as Administrator", and try again.'
+                                                    : 'This usually requires root privileges. A password prompt may have appeared on your desktop. If not, try running the backend with "sudo npm start".')
                                                 : (installResult.details || installResult.nextStep)}
                                         </p>
 
