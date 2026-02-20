@@ -1,6 +1,6 @@
 
 import { useState, useEffect, useRef } from 'react';
-import { Database, Plus, Loader2, AlertCircle, ArrowRight, CheckCircle2, ShieldAlert, WifiOff, Terminal, Search, Info } from 'lucide-react';
+import { Database, Plus, Loader2, AlertCircle, ArrowRight, CheckCircle2, ShieldAlert, Terminal, Search, Info } from 'lucide-react';
 import { getPgStatus, configureDb } from '../../api';
 
 interface AutoInstallResult {
@@ -247,10 +247,14 @@ export default function DatabaseStep({ onNext }: { onNext: () => void }) {
                                 <div className={`flex items-start gap-3 p-4 rounded-lg border ${installResult.code === 'AUTH_FAILED'
                                     ? 'text-amber-400 bg-amber-950/20 border-amber-500/20'
                                     : 'text-red-400 bg-red-950/20 border-red-500/20'}`}>
-                                    {installResult.code === 'AUTH_FAILED' ? <ShieldAlert className="mt-1 flex-shrink-0" /> : <WifiOff className="mt-1 flex-shrink-0" />}
+                                    {installResult.code === 'AUTH_FAILED' ? <ShieldAlert className="mt-1 flex-shrink-0" /> : <AlertCircle className="mt-1 flex-shrink-0" />}
                                     <div className="flex-1">
                                         <p className="font-bold mb-1">{installResult.message}</p>
-                                        <p className="text-xs opacity-70 mb-3">{installResult.details || installResult.nextStep}</p>
+                                        <p className="text-xs opacity-70 mb-3">
+                                            {installResult.code === 'INSTALL_FAILED'
+                                                ? 'This usually happens if the installer isn\'t running as Administrator. Please close the terminal, right-click "Terminal" or "PowerShell", select "Run as Administrator", and try again.'
+                                                : (installResult.details || installResult.nextStep)}
+                                        </p>
 
                                         {installResult.code === 'AUTH_FAILED' && (
                                             <div className="mb-4 space-y-3">

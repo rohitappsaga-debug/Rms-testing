@@ -54,13 +54,38 @@ export const checkPostgresInstalled = async (): Promise<PostgresStatus> => {
 };
 
 /**
+ * Bootstraps Chocolatey package manager using PowerShell.
+ */
+const bootstrapChocolatey = async (onLog?: (data: string) => void): Promise<CommandResult> => {
+    onLog?.('Package manager missing. Bootstrapping Chocolatey...');
+
+    const bootstrapCmd = 'Set-ExecutionPolicy Bypass -Scope Process -Force; [System.Net.ServicePointManager]::SecurityProtocol = [System.Net.ServicePointManager]::SecurityProtocol -bor 3072; iex ((New-Object System.Net.WebClient).DownloadString(\'https://community.chocolatey.org/install.ps1\'))';
+
+    // We run this via powershell.exe explicitly
+    const result = await runShellCommand('powershell.exe', ['-NoProfile', '-ExecutionPolicy', 'Bypass', '-Command', `"${bootstrapCmd}"`], onLog);
+
+    if (result.ok) {
+        onLog?.('Chocolatey installed successfully. Refreshing environment...');
+        // Note: The current process won't have choco in its PATH yet.
+        // We'll rely on the full path or a retry after environment refresh if possible.
+        // For now, we'll try to find where it's usually installed.
+        const chocoPath = 'C:\\ProgramData\\chocolatey\\bin\\choco.exe';
+        if (fs.existsSync(chocoPath)) {
+            onLog?.(`Verified Chocolatey at: ${chocoPath}`);
+        }
+    }
+
+    return result;
+};
+
+/**
  * Installs PostgreSQL using the best available package manager.
  */
 export const installPostgres = async (onLog?: (data: string) => void): Promise<CommandResult> => {
     const platform = os.platform();
 
     if (platform === 'win32') {
-        // Try winget first
+        // 1. Try winget first
         onLog?.('Attempting installation via winget...');
         const winget = await runShellCommand('winget', [
             'install', '--id', 'PostgreSQL.PostgreSQL', '-e',
@@ -70,17 +95,32 @@ export const installPostgres = async (onLog?: (data: string) => void): Promise<C
 
         if (winget.ok) return winget;
 
-        // Fallback to Chocolatey
-        onLog?.('winget failed or missing. Trying Chocolatey...');
-        const choco = await runShellCommand('choco', ['install', 'postgresql', '-y'], onLog);
-        if (choco.ok) return choco;
+        // 2. Try Chocolatey if it exists
+        onLog?.('winget failed or missing. Checking for Chocolatey...');
+        const chocoCheck = await runShellCommand('choco', ['--version']);
+
+        if (chocoCheck.ok) {
+            onLog?.('Found Chocolatey. Installing PostgreSQL...');
+            return await runShellCommand('choco', ['install', 'postgresql', '-y'], onLog);
+        }
+
+        // 3. Bootstrap Chocolatey as last resort
+        onLog?.('Chocolatey missing. Attempting to bootstrap package manager...');
+        const bootstrap = await bootstrapChocolatey(onLog);
+
+        if (bootstrap.ok) {
+            // Try install again using the absolute path to choco to avoid PATH refresh issues
+            const chocoPath = 'C:\\ProgramData\\chocolatey\\bin\\choco.exe';
+            onLog?.('Retrying PostgreSQL installation via bootstrapped Chocolatey...');
+            return await runShellCommand(`"${chocoPath}"`, ['install', 'postgresql', '-y'], onLog);
+        }
 
         return {
             ok: false,
-            code: 'PKG_MANAGER_MISSING',
+            code: 'INSTALL_FAILED',
             stdout: '',
             stderr: '',
-            message: 'Both winget and Chocolatey failed or are missing. Please install PostgreSQL manually.'
+            message: 'Automatic installation failed. Could not bootstrap a package manager or install PostgreSQL. Please install manually or run as Administrator.'
         };
     } else if (platform === 'linux') {
         onLog?.('Detecting Linux package manager...');
