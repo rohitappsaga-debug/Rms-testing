@@ -270,22 +270,35 @@ export const provisionPostgres = async (options: {
     if (!rootClient && os.platform() === 'linux') {
         onLog?.('TCP Auth failed. Trying local CLI fallback (Peer Auth)...');
         try {
-            // Try to create user via psql directly (no password needed for peer auth)
             const dbPassword = providedPassword || generateStrongPassword(32);
 
-            const commands = [
-                `CREATE USER "${dbUser}" WITH ENCRYPTED PASSWORD '${dbPassword}' CREATEDB`,
-                `CREATE DATABASE "${dbName}" OWNER "${dbUser}"`,
-                `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`
+            // Use an idempotent DO block to handle user creation/update
+            const userSql = `DO $$ BEGIN 
+                IF NOT EXISTS (SELECT FROM pg_catalog.pg_roles WHERE rolname = '${dbUser}') THEN 
+                    CREATE ROLE "${dbUser}" WITH LOGIN ENCRYPTED PASSWORD '${dbPassword}' CREATEDB; 
+                ELSE 
+                    ALTER ROLE "${dbUser}" WITH PASSWORD '${dbPassword}'; 
+                END IF; 
+            END $$;`;
+
+            // Use a workaround for CREATE DATABASE IF NOT EXISTS
+            const dbSql = `SELECT 'CREATE DATABASE "${dbName}" OWNER "${dbUser}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${dbName}')\\gexec`;
+
+            const commands = [userSql, dbSql, `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`
             ];
 
             for (const cmd of commands) {
-                // Try as current user first, then sudo if needed
-                const res = await runShellCommand('psql', ['-U', rootUser || 'postgres', '-c', cmd]);
-                if (!res.ok) {
-                    // Sudo fallback if permitted
-                    await runShellCommand('sudo', ['-u', 'postgres', 'psql', '-c', cmd]);
-                }
+                // Try as current user first
+                let res = await runShellCommand('psql', ['-U', rootUser || 'postgres', '-c', cmd]);
+                if (res.ok) continue;
+
+                // Try pkexec for GUI password prompt (Desktop Linux)
+                onLog?.(`psql failed for "${cmd.substring(0, 20)}...". Requesting authorization...`);
+                res = await runShellCommand('pkexec', ['sudo', '-u', 'postgres', 'psql', '-c', cmd]);
+                if (res.ok) continue;
+
+                // Try sudo fallback (terminal auth)
+                await runShellCommand('sudo', ['-u', 'postgres', 'psql', '-c', cmd]);
             }
 
             onLog?.('Provisioning successful via local CLI.');

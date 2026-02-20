@@ -71,9 +71,9 @@ export default function FinishStep({ }: { onNext: () => void }) {
             </h2>
 
             <p className="text-gray-400 mb-8 leading-relaxed">
-                {status === 'idle' && 'The Restaurant Order Booking System has been successfully installed and configured. Press the button below to start the application.'}
-                {status === 'restarting' && 'The installer is shutting down and handing over to the production server...'}
-                {status === 'checking' && 'Waiting for the production server to start on port 3000. This should take just a few seconds.'}
+                {status === 'idle' && 'The Restaurant Order Booking System has been successfully installed and configured. Press the button below to launch your application.'}
+                {status === 'restarting' && 'The installer is stopping and launching the production server...'}
+                {status === 'checking' && 'Wait a moment while the production server starts on port 3000...'}
                 {status === 'ready' && 'The production server is now live! You can now access your restaurant dashboard.'}
             </p>
 
@@ -81,14 +81,11 @@ export default function FinishStep({ }: { onNext: () => void }) {
                 <div className="bg-blue-900/10 border border-blue-800/50 p-6 rounded-xl text-left mb-8 animate-in fade-in slide-in-from-bottom-2 duration-700">
                     <h3 className="font-semibold text-blue-400 mb-2 flex items-center gap-2">
                         <Loader2 size={16} className="animate-spin" />
-                        Still waiting?
+                        Almost there...
                     </h3>
                     <p className="text-sm text-gray-300">
-                        The installer has stopped. If the dashboard doesn't load in building a few more seconds, please **manually restart** the server by running:
+                        The installer has successfully handed over to the main app. If the dashboard doesn't load in a few more seconds, the application might still be initializing.
                     </p>
-                    <div className="mt-3 bg-black/40 p-3 rounded-lg font-mono text-blue-300 text-xs border border-blue-900/30">
-                        npm start
-                    </div>
                 </div>
             )}
 
@@ -96,7 +93,7 @@ export default function FinishStep({ }: { onNext: () => void }) {
                 <div className="bg-gray-800 p-6 rounded-xl text-left mb-8 shadow-xl border border-gray-700">
                     <h3 className="font-semibold text-white mb-2">Final Step</h3>
                     <p className="text-sm text-gray-300">
-                        Clicking "Finish" will stop this installer. Since this is a development environment, you will need to run <code className="text-blue-400">npm start</code> in your terminal to launch the production app.
+                        Clicking "Finish" will stop this installer and automatically launch the main application. You won't need to run any manual commands.
                     </p>
                 </div>
             )}

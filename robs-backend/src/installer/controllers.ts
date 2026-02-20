@@ -308,9 +308,18 @@ export const startInstallation = async (req: Request, res: Response) => {
 };
 
 export const restartServer = async (req: Request, res: Response) => {
-    res.json({ success: true, message: 'Server is restarting...' });
-    setTimeout(() => {
-        process.exit(0);
-    }, 2000);
+    res.json({ success: true, message: 'Server is switching to main application...' });
+
+    // We import this dynamically to avoid circular dependencies
+    const { switchToMainApp } = await import('../index');
+
+    setTimeout(async () => {
+        try {
+            await switchToMainApp();
+        } catch (err) {
+            console.error('Failed to switch to main app:', err);
+            process.exit(1);
+        }
+    }, 1500);
 };
 

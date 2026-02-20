@@ -9,12 +9,12 @@ import { PORTS } from '../config/ports';
 
 import installerRoutes from './routes';
 
+let serverInstance: any = null;
+
 export const startInstallerServer = async () => {
     const app = express();
 
     // The installer ALWAYS binds to PORTS.INSTALLER (3005).
-    // This is fixed — no dynamic resolution needed, no risk of stealing
-    // PORTS.BACKEND (3000) and making the system-check report a false positive.
     const installerPort = PORTS.INSTALLER;
 
     app.use(cors());
@@ -61,7 +61,7 @@ export const startInstallerServer = async () => {
         }
     });
 
-    app.listen(installerPort, () => {
+    serverInstance = app.listen(installerPort, () => {
         console.log('\n');
         console.log('      ╔═══════════════════════════════════════╗');
         console.log('      ║        🚀 INSTALLER MODE STARTED      ║');
@@ -72,4 +72,12 @@ export const startInstallerServer = async () => {
         console.log('      ╚═══════════════════════════════════════╝');
         console.log('\n');
     });
+};
+
+export const stopInstallerServer = () => {
+    if (serverInstance) {
+        serverInstance.close();
+        serverInstance = null;
+        console.log('DEBUG: Installer server stopped.');
+    }
 };

@@ -1,33 +1,60 @@
-
 import fs from 'fs';
 import path from 'path';
-import 'dotenv/config';
+import { config } from 'dotenv';
 
-console.log('DEBUG: Imports complete. Starting application...');
-console.log('DEBUG: Checking for installed.lock...');
-
+// Load initial environment
+config();
 
 // Define lock file path
 const LOCK_FILE = path.join(process.cwd(), 'installed.lock');
 
-// Check if application is installed
-if (!fs.existsSync(LOCK_FILE)) {
-  // Installer Mode
-  console.log('Checking for installed.lock... NOT FOUND. Starting Installer Mode.');
-  import('./installer/server').then(({ startInstallerServer }) => {
-    startInstallerServer();
-  }).catch(err => {
-    console.error('Failed to start installer:', err);
-    process.exit(1);
-  });
-} else {
-  // Main Application Mode
-  console.log('Checking for installed.lock... FOUND. Starting Main Application.');
+/**
+ * Main bootstrap function to start either the installer or the main app.
+ */
+async function bootstrap() {
+  console.log('DEBUG: Checking for installed.lock...');
 
-  // Dynamic import of the main application to avoid side effects (DB connection, etc.) 
-  // running during installer mode
-  import('./main').catch(err => {
-    console.error('Failed to start main application:', err);
+  if (!fs.existsSync(LOCK_FILE)) {
+    // Installer Mode
+    console.log('Checking for installed.lock... NOT FOUND. Starting Installer Mode.');
+    const { startInstallerServer } = await import('./installer/server');
+    await startInstallerServer();
+  } else {
+    // Main Application Mode
+    console.log('Checking for installed.lock... FOUND. Starting Main Application.');
+
+    // Force reload environment variables just before main app starts
+    // to ensure any changes from the installer are effective
+    config({ override: true });
+
+    // Dynamic import of the main application to avoid side effects (DB connection, etc.) 
+    // running during installer mode
+    await import('./main');
+  }
+}
+
+/**
+ * Swaps from installer mode to main app mode without restarting the process.
+ */
+export async function switchToMainApp() {
+  console.log('DEBUG: Switching to main application mode...');
+
+  // Force reload environment variables to ensure any changes from the installer are effective
+  config({ override: true });
+
+  // 1. Stop the installer server gracefully
+  const { stopInstallerServer } = await import('./installer/server');
+  stopInstallerServer();
+
+  // 2. Re-run bootstrap (which will now find the lock file)
+  await bootstrap().catch(err => {
+    console.error('Failed to switch to main application:', err);
     process.exit(1);
   });
 }
+
+// Start the application
+bootstrap().catch(err => {
+  console.error('Failed to start application:', err);
+  process.exit(1);
+});
