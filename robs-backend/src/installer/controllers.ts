@@ -69,7 +69,8 @@ async function performPostgresSetup(
         dbName,
         dbUser,
         rootUser,
-        rootPassword
+        rootPassword,
+        onLog
     });
 
     if (!provisionRes.ok) {
