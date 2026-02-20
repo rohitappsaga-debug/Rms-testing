@@ -210,9 +210,12 @@ app.use(helmet({
 app.use(cors({
     origin: [
         process.env.CORS_ORIGIN || `http://localhost:${PORTS.FRONTEND}`,
-        'http://localhost:3005', // Installer port
+        'http://localhost:3005', // Installer port (localhost)
+        'http://127.0.0.1:3005', // Installer port (IP)
         'http://localhost:5173', // Vite default port
+        'http://127.0.0.1:5173', // Vite default IP
         'http://localhost:4173', // Vite preview port
+        'http://127.0.0.1:4173', // Vite preview IP
     ],
     credentials: true,
     methods: ['GET', 'POST', 'PUT', 'DELETE', 'PATCH', 'OPTIONS'],
