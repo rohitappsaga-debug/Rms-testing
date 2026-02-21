@@ -1,7 +1,7 @@
 
 import { Request, Response } from 'express';
 import { checkSystemRequirements } from './services/systemCheck';
-import { checkPostgresInstalled, installPostgres, provisionPostgres } from './services/postgres';
+import { checkPostgresInstalled, installPostgres, provisionPostgres, checkPrivileges } from './services/postgres';
 import { writeEnv } from './services/envWriter';
 import { runShellCommand } from './services/commandRunner';
 import { PORTS } from '../config/ports';
@@ -31,17 +31,36 @@ export const getDatabaseStatus = async (req: Request, res: Response) => {
  * Internal helper to perform setup with optional logging
  */
 async function performPostgresSetup(
-    options: { database?: string; user?: string; rootUser?: string; rootPassword?: string },
+    options: { database?: string; user?: string; password?: string; rootUser?: string; rootPassword?: string },
     onLog?: (msg: string) => void
 ) {
-    const { database, user, rootUser, rootPassword } = options;
+    const { database, user, password, rootUser, rootPassword } = options;
     const dbName = database || 'restaurant_db';
     const dbUser = user || 'restaurant_user';
+
+    onLog?.('Privileges: Checking for Administrator/Root access...');
+    const privileges = await checkPrivileges();
+    if (!privileges.ok) {
+        onLog?.(`[ERROR] ${privileges.message}`);
+        const nextStep = process.platform === 'win32'
+            ? 'Restart installer as Administrator.'
+            : 'Please restart using: sudo npm run dev';
+
+        throw {
+            code: 'PERMISSION_DENIED',
+            message: privileges.message,
+            nextStep
+        };
+    }
 
     onLog?.('Pre-flight: Checking system requirements...');
     const requirements = await checkSystemRequirements();
     if (requirements.errors.length > 0) {
-        throw { code: 'PREFLIGHT_FAILED', message: 'Critical system requirements missing.' };
+        // Filter out port errors if pg is already installed and might be using that port
+        const realErrors = requirements.errors.filter(e => !e.includes('5432'));
+        if (realErrors.length > 0) {
+            throw { code: 'PREFLIGHT_FAILED', message: 'Critical system requirements missing.' };
+        }
     }
 
     onLog?.('Detection: Checking if PostgreSQL is installed...');
@@ -55,7 +74,7 @@ async function performPostgresSetup(
         onLog?.('PostgreSQL not found. Starting automatic installation...');
         const installRes = await installPostgres(onLog);
         if (!installRes.ok) {
-            throw { code: installRes.code, message: installRes.message };
+            throw { code: installRes.code, message: installRes.message, nextStep: installRes.message.includes('Administrator') ? 'Run as Administrator' : 'Try manual install' };
         }
     } else {
         onLog?.(`Found PostgreSQL ${pgStatus.version || ''}`);
@@ -68,6 +87,7 @@ async function performPostgresSetup(
         port: 5432,
         dbName,
         dbUser,
+        dbPassword: password, // UI can now send a password
         rootUser,
         rootPassword,
         onLog
@@ -95,7 +115,13 @@ async function performPostgresSetup(
         code: 'SUCCESS',
         message: usedExisting ? 'Existing PostgreSQL instance reused and configured.' : 'PostgreSQL installed and configured.',
         usedExisting,
-        credentials: creds
+        credentials: {
+            host: creds.host,
+            port: creds.port,
+            database: creds.database,
+            user: creds.user,
+            password: creds.password // Return final password used
+        }
     };
 }
 

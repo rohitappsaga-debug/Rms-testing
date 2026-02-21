@@ -127,10 +127,10 @@ const sanitizeLog = (log: string): string => {
     const dbUrlRegex = /(postgres(?:ql)?:\/\/[^:]+:)([^@/]+)(@)/g;
 
     // 2. Generic Key-Value secrets (KEY=VALUE)
-    const secretKeyRegex = /((?:SECRET|PASSWORD|KEY|TOKEN|CREDENTIALS|AUTH)[^=]*=)([^ \n\r\t,]+)/gi;
+    const secretKeyRegex = /((?:SECRET|PASSWORD|KEY|TOKEN|CREDENTIALS|AUTH|API_?KEY)[^=]*=)([^ \n\r\t,]+)/gi;
 
     // 3. Quoted passwords in command lines or flags
-    const quotedPassRegex = /(--password[= ]|pass[= ]|pwd[= ])(["']?)([^"'\s]+)(\2)/gi;
+    const quotedPassRegex = /(--password[= ]|pass[= ]|pwd[= ]|--auth-token[= ])(["']?)([^"'\s]+)(\2)/gi;
 
     return log
         .replace(dbUrlRegex, '$1******$3')

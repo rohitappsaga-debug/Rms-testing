@@ -14,7 +14,14 @@ export interface PostgresStatus {
         code: string;
         message: string;
         details?: string;
+        nextStep?: string;
     };
+}
+
+export interface PrivilegeStatus {
+    ok: boolean;
+    isAdmin: boolean;
+    message: string;
 }
 
 const COMMON_WIN_PATHS = [
@@ -24,6 +31,35 @@ const COMMON_WIN_PATHS = [
     'C:\\Program Files\\PostgreSQL\\14\\bin\\psql.exe',
     'C:\\Program Files\\PostgreSQL\\13\\bin\\psql.exe',
 ];
+
+/**
+ * Detects if the current process has administrative/root privileges.
+ */
+export const checkPrivileges = async (): Promise<PrivilegeStatus> => {
+    const platform = os.platform();
+    if (platform === 'win32') {
+        try {
+            // 'net session' fails if not admin
+            const result = await runShellCommand('net', ['session']);
+            return {
+                ok: result.ok,
+                isAdmin: result.ok,
+                message: result.ok
+                    ? 'Administrator privileges detected.'
+                    : 'Administrator privileges required.'
+            };
+        } catch {
+            return { ok: false, isAdmin: false, message: 'Failed to verify Administrator privileges.' };
+        }
+    } else {
+        const isRoot = process.getuid && process.getuid() === 0;
+        return {
+            ok: !!isRoot,
+            isAdmin: !!isRoot,
+            message: isRoot ? 'Root privileges detected.' : 'Root privileges required.'
+        };
+    }
+};
 
 /**
  * Checks if PostgreSQL is installed and accessible.
@@ -83,6 +119,21 @@ const bootstrapChocolatey = async (onLog?: (data: string) => void): Promise<Comm
  */
 export const installPostgres = async (onLog?: (data: string) => void): Promise<CommandResult> => {
     const platform = os.platform();
+    const privileges = await checkPrivileges();
+
+    if (!privileges.ok) {
+        const nextStep = platform === 'win32'
+            ? 'Restart installer as Administrator.'
+            : 'Please restart using: sudo npm run dev';
+
+        return {
+            ok: false,
+            code: 'PERMISSION_DENIED',
+            stdout: '',
+            stderr: '',
+            message: privileges.message + ' ' + nextStep
+        };
+    }
 
     if (platform === 'win32') {
         // 1. Try winget first
@@ -120,13 +171,13 @@ export const installPostgres = async (onLog?: (data: string) => void): Promise<C
             code: 'INSTALL_FAILED',
             stdout: '',
             stderr: '',
-            message: 'Automatic installation failed. Could not bootstrap a package manager or install PostgreSQL. Please install manually or run as Administrator.'
+            message: 'Automatic installation failed. Could not bootstrap a package manager or install PostgreSQL.'
         };
     } else if (platform === 'linux') {
         onLog?.('Detecting Linux package manager...');
 
         const managers = [
-            { cmd: 'apt-get', name: 'apt', args: ['update', '&&', 'apt-get', 'install', '-y', 'postgresql', 'postgresql-contrib'] },
+            { cmd: 'apt-get', name: 'apt', args: ['update', '&&', 'DEBIAN_FRONTEND=noninteractive', 'apt-get', 'install', '-y', 'postgresql', 'postgresql-contrib'] },
             { cmd: 'dnf', name: 'dnf', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] },
             { cmd: 'yum', name: 'yum', args: ['install', '-y', 'postgresql-server', 'postgresql-contrib'] }
         ];
@@ -134,21 +185,16 @@ export const installPostgres = async (onLog?: (data: string) => void): Promise<C
         for (const manager of managers) {
             const check = await runShellCommand(manager.cmd, ['--version']);
             if (check.ok) {
-                onLog?.(`Found ${manager.cmd}. Starting installation...`);
-
-                // Try pkexec first for desktop users (GUI password prompt)
-                onLog?.('Requesting root privileges via pkexec...');
-                const pkResult = await runShellCommand('pkexec', [manager.cmd, ...manager.args], onLog);
-                if (pkResult.ok) return pkResult;
-
-                // Fallback to sudo (which may fail if non-interactive)
-                onLog?.('pkexec failed or unavailable. Falling back to sudo...');
-                return await runShellCommand('sudo', manager.args, onLog);
+                onLog?.(`Found ${manager.cmd}. Starting non-interactive installation...`);
+                // We are already root, so run directly
+                return await runShellCommand(manager.cmd, manager.args, onLog);
             }
         }
     } else if (platform === 'darwin') {
         onLog?.('Attempting installation via Homebrew...');
-        const brew = await runShellCommand('brew', ['install', 'postgresql@14'], onLog); // specific version often safer
+        // Homebrew shouldn't really be run as root, but if we are root, it might fail.
+        // However, the requirement says "run as root" for the installer.
+        const brew = await runShellCommand('brew', ['install', 'postgresql@14'], onLog);
         if (brew.ok) return brew;
     }
 
@@ -284,21 +330,16 @@ export const provisionPostgres = async (options: {
             // Use a workaround for CREATE DATABASE IF NOT EXISTS
             const dbSql = `SELECT 'CREATE DATABASE "${dbName}" OWNER "${dbUser}"' WHERE NOT EXISTS (SELECT FROM pg_database WHERE datname = '${dbName}')\\gexec`;
 
-            const commands = [userSql, dbSql, `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`
-            ];
+            const commands = [userSql, dbSql, `GRANT ALL PRIVILEGES ON DATABASE "${dbName}" TO "${dbUser}"`];
 
             for (const cmd of commands) {
-                // Try as current user first
-                let res = await runShellCommand('psql', ['-U', rootUser || 'postgres', '-c', cmd]);
+                // Try as current user first (already root)
+                let res = await runShellCommand('su', ['-', 'postgres', '-c', `psql -c "${cmd}"`]);
                 if (res.ok) continue;
 
-                // Try pkexec for GUI password prompt (Desktop Linux)
-                onLog?.(`psql failed for "${cmd.substring(0, 20)}...". Requesting authorization...`);
-                res = await runShellCommand('pkexec', ['sudo', '-u', 'postgres', 'psql', '-c', cmd]);
+                // Fallback to direct psql if su fails
+                res = await runShellCommand('psql', ['-U', rootUser || 'postgres', '-c', cmd]);
                 if (res.ok) continue;
-
-                // Try sudo fallback (terminal auth)
-                await runShellCommand('sudo', ['-u', 'postgres', 'psql', '-c', cmd]);
             }
 
             onLog?.('Provisioning successful via local CLI.');

@@ -67,6 +67,7 @@ export default function DatabaseStep({ onNext }: { onNext: () => void }) {
         const params = new URLSearchParams({
             database: config.database,
             user: config.user,
+            password: config.password, // Send password if user entered one
             rootUser: config.rootUser,
             rootPassword: config.rootPassword
         });
@@ -250,12 +251,12 @@ export default function DatabaseStep({ onNext }: { onNext: () => void }) {
                                     {installResult.code === 'AUTH_FAILED' ? <ShieldAlert className="mt-1 flex-shrink-0" /> : <AlertCircle className="mt-1 flex-shrink-0" />}
                                     <div className="flex-1">
                                         <p className="font-bold mb-1">{installResult.message}</p>
-                                        <p className="text-xs opacity-70 mb-3">
-                                            {installResult.code === 'INSTALL_FAILED'
+                                        <p className="text-xs opacity-70 mb-3 whitespace-pre-wrap">
+                                            {installResult.nextStep || (installResult.code === 'INSTALL_FAILED'
                                                 ? (window.navigator.platform.toLowerCase().includes('win')
                                                     ? 'This usually happens if the installer isn\'t running as Administrator. Please close the terminal, right-click "Terminal" or "PowerShell", select "Run as Administrator", and try again.'
-                                                    : 'This usually requires root privileges. A password prompt may have appeared on your desktop. If not, try running the backend with "sudo npm start".')
-                                                : (installResult.details || installResult.nextStep)}
+                                                    : 'This usually requires root privileges. Please restart using "sudo npm run dev".')
+                                                : (installResult.details || 'Check logs for more information.'))}
                                         </p>
 
                                         {installResult.code === 'AUTH_FAILED' && (
