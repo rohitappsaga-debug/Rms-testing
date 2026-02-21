@@ -11,7 +11,8 @@ import net from 'net';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import path from 'path';
-import { PORTS } from '@/config/ports';
+import { PORTS, getPort } from '@/config/ports';
+import { findAvailablePort } from '@/utils/port-finder';
 
 console.log('DEBUG: Imports complete. Starting application...');
 
@@ -388,19 +389,23 @@ const gracefulShutdown = async (signal: string) => {
 process.on('SIGTERM', () => gracefulShutdown('SIGTERM'));
 process.on('SIGINT', () => gracefulShutdown('SIGINT'));
 
-// Start server
-const PORT = PORTS.BACKEND;
+// Start server — resolved dynamically at runtime from process.env.PORT (or default 3000)
+// findAvailablePort() will increment if the configured port is already in use
 
 const startServer = async () => {
     console.log('DEBUG: startServer called');
     try {
+        // Resolve which port to use — reads process.env.PORT, auto-increments if busy
+        const PORT = await findAvailablePort(getPort('BACKEND'));
+        // Expose the actual port so other parts of the process can read it
+        process.env.PORT = String(PORT);
+
         // Connect to database
         console.log('DEBUG: Connecting to database...');
         await connectDatabase();
         console.log('DEBUG: Database connected.');
 
-        // Start HTTP server - bind directly without pre-checking
-        // This eliminates the race condition where port becomes busy between check and bind
+        // Start HTTP server — port is already confirmed free by findAvailablePort()
         console.log(`DEBUG: Attempting to listen on port ${PORT}...`);
         server.listen(PORT, '0.0.0.0', () => {
             logger.info(`=================================`);
