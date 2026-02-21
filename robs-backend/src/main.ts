@@ -11,6 +11,7 @@ import net from 'net';
 import swaggerJsdoc from 'swagger-jsdoc';
 import swaggerUi from 'swagger-ui-express';
 import path from 'path';
+import fs from 'fs';
 import { PORTS, getPort } from '@/config/ports';
 import { findAvailablePort } from '@/utils/port-finder';
 
@@ -284,12 +285,59 @@ app.get('/health', (req, res) => {
 
 // Serve static files from the React frontend app
 const frontendPath = path.join(__dirname, '../../robs-frontend/build');
-app.use(express.static(frontendPath));
+const indexHtmlPath = path.join(frontendPath, 'index.html');
 
-// Handle React routing, return all requests to React app
-app.get('*', (req, res) => {
-    res.sendFile(path.join(frontendPath, 'index.html'));
-});
+if (fs.existsSync(indexHtmlPath)) {
+    app.use(express.static(frontendPath));
+    // Handle React routing, return all requests to React app
+    app.get('*', (req, res) => {
+        res.sendFile(indexHtmlPath);
+    });
+} else {
+    logger.warn(`⚠️ Frontend build not found at: ${frontendPath}`);
+    logger.warn(`   Run "npm run build --workspace=robs-frontend" to build it.`);
+
+    // Serve a friendly error page instead of crashing or returning 404/JSON
+    app.get('*', (req, res) => {
+        // If it's an API request, let it go to the 404 handler normally
+        if (req.path.startsWith('/api')) {
+            return res.status(404).json({
+                success: false,
+                error: 'API endpoint not found',
+                help: 'The backend is running, but the frontend build is missing. Use /health or /api-docs to verify the API.'
+            });
+        }
+
+        // For all other requests (browser), serve a helpful HTML page
+        res.status(503).send(`
+            <!DOCTYPE html>
+            <html lang="en">
+            <head>
+                <meta charset="UTF-8">
+                <meta name="viewport" content="width=device-width, initial-scale=1.0">
+                <title>Frontend Build Missing</title>
+                <style>
+                    body { font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif; display: flex; align-items: center; justify-content: center; height: 100vh; margin: 0; background: #f4f7f6; color: #333; }
+                    .card { background: white; padding: 2.5rem; border-radius: 12px; box-shadow: 0 4px 12px rgba(0,0,0,0.1); max-width: 500px; text-align: center; border-top: 5px solid #ff9800; }
+                    h1 { margin-top: 0; color: #e65100; }
+                    p { line-height: 1.6; }
+                    code { background: #eee; padding: 0.2rem 0.4rem; border-radius: 4px; font-weight: bold; }
+                    .footer { margin-top: 2rem; font-size: 0.9rem; color: #666; }
+                </style>
+            </head>
+            <body>
+                <div class="card">
+                    <h1>🛠️ Frontend Missing</h1>
+                    <p>The backend server is running correctly, but the <strong>frontend build directory</strong> was not found.</p>
+                    <p>To fix this, go to the project root and run:</p>
+                    <p><code>npm run build --workspace=robs-frontend</code></p>
+                    <div class="footer">Refreshing this page after the build finishes will launch the app.</div>
+                </div>
+            </body>
+            </html>
+        `);
+    });
+}
 
 // Socket.io authentication middleware
 io.use(async (socket, next) => {

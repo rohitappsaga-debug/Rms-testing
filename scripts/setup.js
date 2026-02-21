@@ -134,6 +134,11 @@ async function buildInstaller() {
  * Kills processes running on specific ports (Windows).
  */
 function killProcessesOnPorts(ports) {
+    if (process.platform !== 'win32') {
+        log('Skipping port cleanup on non-Windows platform...');
+        return;
+    }
+
     log(`Cleaning up ports: ${ports.join(', ')}...`);
     for (const port of ports) {
         try {
@@ -157,6 +162,19 @@ function killProcessesOnPorts(ports) {
                 });
             }
         } catch (err) { }
+    }
+}
+
+async function buildFrontend() {
+    log('Building Frontend Application...');
+    if (!fs.existsSync(frontendDir)) {
+        log('robs-frontend directory not found. Skipping frontend build.');
+        return;
+    }
+    try {
+        await runCommand('npm', ['run', 'build'], { cwd: frontendDir });
+    } catch (err) {
+        log(`[WARN] Frontend build failed: ${err.message}. You may need to build it manually.`);
     }
 }
 
@@ -204,12 +222,13 @@ function startProduction() {
 async function run() {
     log('Starting RMS Automated Setup...');
 
-    // Kill any hanging processes from previous attempts
+    // Kill any hanging processes from previous attempts (Windows only)
     killProcessesOnPorts([3000, 3002, 3005]);
 
     clean();
     await installDeps();
     await buildInstaller();
+    await buildFrontend();
 
     // Step 1: Run the installer and wait for it to finish (User clicks Finish)
     try {
